@@ -1180,3 +1180,35 @@ def test_unrelated_ui_text_does_not_become_a_phantom_troop_row():
     readings = ocr_module.read_all(image_bytes, list(TABLE.units))
     counts = [r.count for r in readings[0].rows]
     assert 1 not in counts
+
+
+def test_glyph_icon_noise_beside_the_name_does_not_replace_the_count():
+    """Production report: a screenshot with Royal Guard/Elite Janissary/Long
+    Swordsman/Knight rows came back missing both unrecognised-name rows
+    entirely, with Knight's count misread as a bare "2".
+
+    Not reproducible locally against this exact build of Tesseract - every
+    local pass reads all four rows and Knight's real 11,482 correctly - the
+    same kind of local/production OCR variance seen elsewhere this session.
+    But the failure shape (a small stray number appearing where the real
+    count should be) matches a real gap in _count_word: it took the FIRST
+    number to the right of the name, and a type/weapon glyph icon sitting
+    between the name and the real count can itself OCR as a small stray
+    number there, exactly the class of noise already documented elsewhere
+    in this file (see _merge_split_numbers, _trim_spurious_leading_groups).
+    Hardened by taking the LARGEST number after the name instead of the
+    first - a real count is always far larger than glyph noise, and never
+    smaller than the heal-slider's boxed number, the only other candidate
+    on the line. This test locks in a correct read of the real screenshot
+    so a regression here is caught even without reproducing the original
+    corrupted OCR pass.
+    """
+    from rok import ocr as ocr_module
+
+    path = IMAGES / "43_royal_guard_janissary_missing_rows.webp"
+    if not path.exists():
+        pytest.skip("sample image not present locally")
+    image_bytes = path.read_bytes()
+    readings = ocr_module.read_all(image_bytes, list(TABLE.units))
+    counts = {r.count for r in readings[0].rows}
+    assert {98_615, 11_482, 49_270, 488_597} <= counts

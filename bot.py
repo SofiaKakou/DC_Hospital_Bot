@@ -414,7 +414,18 @@ async def process_siege_submission(job: SiegeJob) -> None:
             except Exception:
                 pass
 
-            if not reading.total_siege and not reading.warnings:
+            # "No troop icons found" is read_siege's own signal that this
+            # doesn't look like the right screen at all (its global frame
+            # scan found nothing) - that's the one case worth rejecting
+            # outright. Zero siege with no such warning is a completely
+            # legitimate result, not a failure: it means the icon grid was
+            # read fine and none of the icons on it were siege. Production
+            # report: a player who disbands/loses all their siege units
+            # doesn't just show 0 counts - the siege icon can disappear
+            # from the grid entirely, which used to be indistinguishable
+            # here from a genuinely unreadable screenshot and got rejected
+            # instead of correctly recorded as a Pass.
+            if "No troop icons found in the screenshot." in reading.warnings:
                 text = (
                     f"{FAIL} I could not find any siege units in that screenshot. "
                     "Make sure it's the 'Troop Details' > 'Total Number of Units' screen."

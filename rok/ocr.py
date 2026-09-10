@@ -600,14 +600,29 @@ def _count_word(line: "_Line") -> "_Word | None":
     slider, which the player can drag down. Reading it would report less than
     the hospital actually holds. The two agree only while the slider is at max.
 
-    Taken as the first number to the right of where the name starts, so a tier
-    numeral OCR'd out of the portrait cannot be mistaken for the count.
+    Among the numbers to the right of where the name starts (so a tier
+    numeral OCR'd out of the portrait cannot be mistaken for the count),
+    picks the LARGEST rather than the first. A weapon/type glyph icon
+    between the name and the real count can itself get OCR'd as noise -
+    seen elsewhere in this file as a stray token next to a real number - and
+    when that noise lands to the right of the name instead of the left, the
+    first-numeric-word rule used to hand back a 1-2 digit fragment instead
+    of the real count. The largest number after the name is always the real
+    count in practice: glyph noise never OCRs as a multi-digit number
+    anywhere near the size of an actual troop count, and the only other
+    candidate on this line (the heal slider) is capped at the real count,
+    never above it.
     """
     name_left = _name_start(line)
     if name_left is None:
         return None
     after_name = [w for w in line.numeric_words() if w.left > name_left]
-    return after_name[0] if after_name else None
+    if not after_name:
+        return None
+    def _value(word: "_Word") -> int:
+        value, _ = parse_number(word.text)
+        return value if value is not None else -1
+    return max(after_name, key=_value)
 
 
 @dataclass
