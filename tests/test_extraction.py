@@ -1116,3 +1116,36 @@ def test_a_row_clipped_by_the_game_s_own_ui_does_not_get_a_wrong_tier():
     row = rows_by_name.get("crossbowman")
     assert row is not None
     assert row.tier in (None, "T4")
+
+
+def test_alliance_auto_heal_banner_fraction_does_not_corrupt_the_totals():
+    """Production report: a Vietnamese screenshot's T5 axe-thrower row
+    (197,230 troops, clearly visible) got a "needs review" warning instead
+    of reading cleanly.
+
+    The window shows two alliance auto-heal banners above the troop list
+    ("<name> auto-helped heal your units. 10/30"), each with its own small
+    fraction - out of a fixed 30 help slots, a game constant unrelated to
+    hospital capacity. Nothing in this window calls that banner out by name
+    the way "Battering Ram Zone" does, so its fraction fell through to
+    _read_totals' capacity-based default and got recorded as the ram-zone
+    total (0/50,000 corrupted to 10/30). Every row's scale is measured from
+    that total, so the whole read broke, not just one row.
+
+    A real wounded/ram-zone capacity is never anywhere near this small - see
+    the floor added in _read_totals (rok/ocr.py) for the fix, which rejects
+    a fraction that small without ever having to string-match the banner's
+    (language-dependent) wording.
+    """
+    from rok import ocr as ocr_module
+
+    path = IMAGES / "42_vietnamese_t5_axethrower_warning.webp"
+    if not path.exists():
+        pytest.skip("sample image not present locally")
+    image_bytes = path.read_bytes()
+    readings = ocr_module.read_all(image_bytes, list(TABLE.units))
+    reading = readings[0]
+    assert reading.ram_capacity == 50_000
+    assert reading.wounded_capacity == 584_400
+    counts = {r.count: r.tier for r in reading.rows}
+    assert counts.get(197_230) == "T5"

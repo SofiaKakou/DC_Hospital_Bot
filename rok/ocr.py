@@ -555,6 +555,21 @@ def _read_totals(
 
         if "/" in line.text:
             current, capacity = parse_fraction(line.text)
+            # The alliance auto-heal banner ("<name> auto-helped heal your
+            # units. 10/30") prints its own small fraction - out of a fixed
+            # 30 help slots, a game constant independent of language or
+            # hospital level. Production report: with no "pending" label in
+            # front of it (nothing in this window calls it out by name the
+            # way "Battering Ram Zone" does), that fraction fell into the
+            # capacity-based default below and got recorded as the ram-zone
+            # total, corrupting the whole read - every row after depended on
+            # it for scale. A real wounded/ram-zone capacity is never this
+            # small (the smallest seen in practice is in the tens of
+            # thousands), so a floor here is a safe, language-independent
+            # way to reject the helper meter without ever having to
+            # string-match its wording.
+            if capacity is not None and capacity < 1000:
+                continue
             if current is not None and capacity is not None:
                 anchor = next(
                     (w for w in line.words if "/" in w.text),
