@@ -65,6 +65,13 @@ _IMAGE_TYPES = (".png", ".jpg", ".jpeg", ".webp")
 OK, PARTIAL, FAIL = "\N{WHITE HEAVY CHECK MARK}", "\N{WARNING SIGN}", "\N{CROSS MARK}"
 QUEUED = "\N{HOURGLASS WITH FLOWING SAND}"
 
+# Below this, the nuanced fill_check/breakdown gate still applies. At or
+# above it, a submission gets a green check outright regardless of unknown
+# units or an incomplete breakdown - see process_submission for the tradeoff
+# this was an explicit, informed choice against (it bypasses the tier/type
+# anti-padding check for anyone clearing this floor on raw wounded troops).
+SIMPLE_PASS_WOUNDED_FLOOR = 200_000
+
 intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
@@ -161,7 +168,18 @@ def build_embed(submission: Submission, name: str, merge_notes: list[str]) -> di
     summary = submission.summary
     problems = submission.missing()
 
-    if submission.breakdown_complete:
+    # See SIMPLE_PASS_WOUNDED_FLOOR / process_submission: a submission whose
+    # raw Severely Wounded total already clears this floor is treated as
+    # Recorded regardless of unknown units or an incomplete breakdown, so
+    # the log entry's own colour/title agree with the reaction it gets in
+    # the submission channel instead of showing a gold/red "needs attention"
+    # title next to a green check.
+    big_enough = (
+        submission.wounded_current is not None
+        and submission.wounded_current >= SIMPLE_PASS_WOUNDED_FLOOR
+    )
+
+    if submission.breakdown_complete or big_enough:
         colour, title = discord.Colour.green(), "Recorded"
     elif submission.needs_human:
         colour, title = discord.Colour.red(), "Needs review"
@@ -324,12 +342,25 @@ async def process_submission(job: SubmissionJob) -> None:
             )
             merge_notes = submission.merge(result, job.image_url, message.jump_url)
 
+            # By explicit request: a submission whose raw Severely Wounded
+            # total already clears this floor gets a green check outright,
+            # full stop - no unknown-unit or partial-breakdown nuance. That
+            # is a deliberate trade against the tier/type padding check
+            # (fill_check, still shown in the log embed below for whoever
+            # wants the detail); the alternative - keeping the nuanced
+            # gate - was flagged and turned down as too many false-looking
+            # warnings on otherwise-fine submissions in practice.
+            big_enough = (
+                submission.wounded_current is not None
+                and submission.wounded_current >= SIMPLE_PASS_WOUNDED_FLOOR
+            )
+
             written = False
             if SHEETS and submission.recordable:
                 try:
                     await asyncio.to_thread(SHEETS.write, submission, name)
                     written = True
-                    if submission.breakdown_complete:
+                    if submission.breakdown_complete or big_enough:
                         SESSIONS.clear(job.governor_id)
                 except Exception as exc:
                     log.exception("Sheet write failed")
@@ -339,7 +370,7 @@ async def process_submission(job: SubmissionJob) -> None:
             if written:
                 embed.set_footer(text=embed.footer.text + " - written to the sheet")
 
-            await message.add_reaction(OK if submission.breakdown_complete else PARTIAL)
+            await message.add_reaction(OK if (big_enough or submission.breakdown_complete) else PARTIAL)
             await log_result(message, embed=embed)
     except Exception as exc:
         # A crashed job must not take the worker down with it, and the player
