@@ -102,6 +102,22 @@ class SiegeJob:
 
 
 SIEGE_QUEUE: asyncio.Queue[SiegeJob] = asyncio.Queue()
+
+
+@dataclass
+class TestJob:
+    message: discord.Message
+    image_bytes: bytes
+    governor_id: str
+
+
+# A single worker, deliberately not CFG.submission_workers: this queue was
+# originally fired off with asyncio.create_task (no limit at all), which let
+# an admin's test run fully concurrently with real submissions and starve
+# them of CPU on a resource-constrained host - measured in production, not
+# hypothetical. One worker means a test can never take capacity away from
+# real traffic; it just waits its turn like everything else.
+TEST_QUEUE: asyncio.Queue[TestJob] = asyncio.Queue()
 _workers_started = False
 
 
@@ -573,7 +589,8 @@ async def on_ready() -> None:
             client.loop.create_task(submission_worker(worker_id))
         for worker_id in range(CFG.submission_workers):
             client.loop.create_task(siege_worker(worker_id))
-        log.info("Started %d submission worker(s) and %d siege worker(s).",
+        client.loop.create_task(test_worker(0))
+        log.info("Started %d submission worker(s), %d siege worker(s), 1 test worker.",
                  CFG.submission_workers, CFG.submission_workers)
         _workers_started = True
 
@@ -731,7 +748,19 @@ async def handle_log_test_message(message: discord.Message) -> None:
         return
 
     await message.add_reaction(QUEUED)
-    asyncio.create_task(_run_log_test(message, image_bytes, governor_id))
+    await TEST_QUEUE.put(TestJob(message=message, image_bytes=image_bytes, governor_id=governor_id))
+
+
+async def test_worker(worker_id: int) -> None:
+    log.info("Test worker %d started.", worker_id)
+    while True:
+        job = await TEST_QUEUE.get()
+        try:
+            await _run_log_test(job.message, job.image_bytes, job.governor_id)
+        except Exception:
+            log.exception("Test worker %d: unhandled error outside _run_log_test", worker_id)
+        finally:
+            TEST_QUEUE.task_done()
 
 
 async def _run_log_test(message: discord.Message, image_bytes: bytes, governor_id: str) -> None:
@@ -1044,6 +1073,7 @@ async def health(interaction: discord.Interaction) -> None:
         f"Open submissions: {len(SESSIONS.open_ids())}",
         f"Queued for OCR: {QUEUE.qsize()} ({CFG.submission_workers} worker(s))",
         f"Queued for siege check: {SIEGE_QUEUE.qsize()}",
+        f"Queued test submissions: {TEST_QUEUE.qsize()}",
     ]
     await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
