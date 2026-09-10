@@ -813,6 +813,7 @@ def _read_rows(
             box_column = None
             tolerance = 0.0
 
+        unnamed: list[tuple[_Line, str, int]] = []
         for line in lines:
             if any(line is l for l in matched_lines):
                 continue
@@ -833,7 +834,52 @@ def _read_rows(
             value, _ = parse_number(candidate.text)
             if not value:
                 continue
-            candidates.append((line, " ".join(letters).strip(), value))
+            unnamed.append((line, " ".join(letters).strip(), value))
+
+        # With at least one matched row, box_column above already anchors
+        # and filters this. With none - every name on screen unrecognised,
+        # routine for an untaught civilisation/language - there is no
+        # column to check against at all, and this used to accept anything.
+        # Production report: a Vietnamese client's fixed play-time warning
+        # banner ("18+ ... 180 minutes ...") happened to print a stray "1"
+        # that slipped through this gap and got recorded as a phantom
+        # 1-troop unit. A real row always has SOME frame-coloured pixels in
+        # the portrait area just left of its name, even on a row whose
+        # frame is too faint/fragmented for the stricter box-fitting checks
+        # to confirm a clean rectangle (measured: requiring an actual fitted
+        # box here, tried first, wrongly dropped a genuine row those
+        # stricter checks already miss for other reasons - see
+        # test_turkish_period_grouped_hospital_counts_read_correctly). Loose
+        # density is enough to tell the two apart: the real row measured at
+        # 35-40% in that area on real screenshots, the banner text at
+        # exactly 0% - nothing frame-coloured anywhere near it at all.
+        if box_column is None and unnamed:
+            kept = []
+            for line, letters, value in unnamed:
+                name_left = _name_start(line)
+                if name_left is None:
+                    continue
+                name_left = name_left / scale
+                left = max(0, int(name_left - unit * 3.2))
+                right = max(0, int(name_left - unit * 0.05))
+                centre = (line.top + line.bottom) / 2 / scale
+                top = max(0, int(centre - unit * 0.9))
+                bottom = int(centre + unit * 0.9)
+                if right - left < 3 or bottom - top < 3:
+                    continue
+                pixels = source.load()
+                hits = sum(
+                    1
+                    for x in range(left, right)
+                    for y in range(top, bottom)
+                    if _is_frame(*pixels[x, y][:3])
+                )
+                total = (right - left) * (bottom - top)
+                if total and hits / total >= 0.08:
+                    kept.append((line, letters, value))
+            unnamed = kept
+
+        candidates.extend(unnamed)
 
     if not candidates:
         return

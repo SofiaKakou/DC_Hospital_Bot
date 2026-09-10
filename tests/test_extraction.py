@@ -1149,3 +1149,34 @@ def test_alliance_auto_heal_banner_fraction_does_not_corrupt_the_totals():
     assert reading.wounded_capacity == 584_400
     counts = {r.count: r.tier for r in reading.rows}
     assert counts.get(197_230) == "T5"
+
+
+def test_unrelated_ui_text_does_not_become_a_phantom_troop_row():
+    """Companion to the auto-heal-banner totals fix above, on the same
+    screenshot: even after the totals read correctly, a fixed play-time
+    warning banner in the screenshot's top-left corner ("18+ ... 180
+    minutes ...") was itself getting picked up as a troop row - "Chol",
+    count 1 - by the unrecognised-name fallback in _read_rows.
+
+    That fallback normally anchors on the x-column of already-recognised
+    unit names, but every name on a client whose language the unit table
+    doesn't cover yet is "unrecognised" (routine, not a bug on its own),
+    which left no column to anchor against and let anything with a number
+    on it through. A real row always has some frame-coloured pixels in its
+    portrait area, even one whose frame is too faint for the stricter
+    per-row/fitted-box checks to confirm a clean rectangle; a stray line of
+    UI text has none. See rok/ocr.py's _read_rows for the density check
+    this was fixed with, and the docstring there for why a stricter
+    box-shaped check was tried first and rejected (it also dropped a
+    genuine row - test_turkish_period_grouped_hospital_counts_read_correctly
+    is the regression that caught it).
+    """
+    from rok import ocr as ocr_module
+
+    path = IMAGES / "42_vietnamese_t5_axethrower_warning.webp"
+    if not path.exists():
+        pytest.skip("sample image not present locally")
+    image_bytes = path.read_bytes()
+    readings = ocr_module.read_all(image_bytes, list(TABLE.units))
+    counts = [r.count for r in readings[0].rows]
+    assert 1 not in counts
