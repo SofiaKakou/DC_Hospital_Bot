@@ -602,6 +602,10 @@ async def on_message(message: discord.Message) -> None:
     if message.author.bot:
         return
 
+    if CFG.verification_log_channel_id and message.channel.id == CFG.verification_log_channel_id:
+        await handle_log_test_message(message)
+        return
+
     if CFG.siege_check_channel_id and message.channel.id == CFG.siege_check_channel_id:
         await handle_siege_message(message)
         return
@@ -705,6 +709,79 @@ async def handle_siege_message(message: discord.Message) -> None:
             image_url=images[0].url,
         )
     )
+
+
+async def handle_log_test_message(message: discord.Message) -> None:
+    """Let an admin test either screenshot type directly in the log channel,
+    where regular players never look, instead of posting in a real
+    submission channel just to check a reading. Tries hospital first, then
+    siege, whichever the screenshot actually is - the caller doesn't have to
+    say which. Nothing is written to the sheet and no roster check applies:
+    this is for "can it read this at all", not a real submission.
+    """
+    images = [a for a in message.attachments if is_image(a)]
+    if not images or len(images) > 1:
+        return
+
+    governor_id = extract_governor_id(message.content) or "test"
+    try:
+        image_bytes = await images[0].read()
+    except Exception as exc:
+        await message.reply(f"{FAIL} Could not download that attachment: {exc}", mention_author=False)
+        return
+
+    await message.add_reaction(QUEUED)
+    asyncio.create_task(_run_log_test(message, image_bytes, governor_id))
+
+
+async def _run_log_test(message: discord.Message, image_bytes: bytes, governor_id: str) -> None:
+    try:
+        async with message.channel.typing():
+            result = await asyncio.to_thread(
+                pipeline.extract,
+                image_bytes,
+                TABLE,
+                anthropic_api_key=CFG.anthropic_api_key,
+                vision_model=CFG.vision_model,
+                tesseract_cmd=CFG.tesseract_cmd,
+            )
+
+            try:
+                await message.remove_reaction(QUEUED, client.user)
+            except Exception:
+                pass
+
+            if result.reading.wounded_current is not None:
+                submission = Submission(
+                    governor_id=governor_id,
+                    discord_user_id=message.author.id,
+                    discord_user_name=message.author.display_name,
+                )
+                merge_notes = submission.merge(result, "", message.jump_url)
+                embed = build_embed(submission, "", merge_notes)
+                embed.title = f"[TEST - not recorded] {embed.title}"
+                await message.reply(embed=embed, mention_author=False)
+                return
+
+            siege_reading = await asyncio.to_thread(read_siege, image_bytes)
+            if "No troop icons found in the screenshot." not in siege_reading.warnings:
+                verdict, notes = check_siege_rules(siege_reading)
+                embed = build_siege_embed(governor_id, "", siege_reading, verdict, notes)
+                embed.title = f"[TEST - not recorded] {embed.title}"
+                await message.reply(embed=embed, mention_author=False)
+                return
+
+            await message.reply(
+                f"{FAIL} Could not read this as either a hospital or a siege screenshot.",
+                mention_author=False,
+            )
+    except Exception as exc:
+        log.exception("Log-channel test failed")
+        try:
+            await message.remove_reaction(QUEUED, client.user)
+        except Exception:
+            pass
+        await message.reply(f"{FAIL} Test failed: {exc}", mention_author=False)
 
 
 # --------------------------------------------------------------------------- #
