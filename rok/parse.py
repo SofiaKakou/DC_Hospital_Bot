@@ -150,7 +150,17 @@ def check_totals(reading: Reading) -> list[str]:
             problems.append("Read siege units but no 'Battering Ram Zone' total.")
     else:
         listed = sum(r.count for r in reading.ram_rows)
-        if listed != reading.ram_current:
+        # Over count only, not an exact match: unlike the wounded list, this
+        # screen has no way to itemise Ram Zone troops at all except in the
+        # rare case where the whole zone happens to be Battering Rams -
+        # classify_siege() (rok/pipeline.py) already credits that case by
+        # reconciling against the totals rather than assuming it from unit
+        # type. Every other real report has zero ram_rows and a non-zero
+        # ram_current, which used to fail this check outright on every
+        # single one of them - a screenshot whose wounded list reconciled
+        # perfectly still got flagged solely because of an inherently
+        # un-itemisable, separate total.
+        if listed > reading.ram_current:
             problems.append(
                 f"Battering Ram Zone rows add up to {listed:,} but the total says "
                 f"{reading.ram_current:,}."

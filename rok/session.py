@@ -71,10 +71,27 @@ class Submission:
 
     @property
     def unaccounted(self) -> int | None:
-        """Troops counted in the totals but not attributed to a named unit."""
-        if self.total_in_hospital is None:
+        """Wounded troops counted in the total but not attributed to a
+        named unit.
+
+        Ram Zone troops are deliberately excluded from this: this screen has
+        no way to itemise them beyond the rare case where the whole zone is
+        Battering Rams, and classify_siege() (rok/pipeline.py) already
+        credits that case correctly by reconciling against the totals
+        rather than assuming by unit type. Counting an unbreakdownable
+        Ram Zone gap as "unaccounted" here used to flag every submission
+        with any ram-zone troops as permanently incomplete - a real report
+        with a fully-reconciled wounded list (rows summed to the exact
+        wounded total) still got a "totals only" warning reaction purely
+        because of its separate, structurally un-itemisable ram-zone count.
+        Sending another screenshot can never fix that gap, unlike a
+        genuinely scrolled-off wounded row, so it should not be reported
+        the same way.
+        """
+        if self.wounded_current is None:
             return None
-        return max(0, self.total_in_hospital - self.identified_troops)
+        identified_wounded = sum(r.count for r in self.all_rows if not r.in_ram_zone)
+        return max(0, self.wounded_current - identified_wounded)
 
     def high_tier_troops(self, table: UnitTable) -> int:
         """Troops we can see that belong to a tier the fill rule counts."""
@@ -195,9 +212,9 @@ class Submission:
             notes.insert(0, "Haven't read the 'Severely Wounded Units' total yet.")
         elif self.unaccounted:
             notes.append(
-                f"{self.unaccounted:,} of {self.total_in_hospital:,} troops aren't broken "
-                "down by unit yet - send a screenshot scrolled to the rest of the list if "
-                "you want the tier detail."
+                f"{self.unaccounted:,} of {self.wounded_current:,} wounded troops aren't "
+                "broken down by unit yet - send a screenshot scrolled to the rest of the "
+                "list if you want the tier detail."
             )
         return notes
 

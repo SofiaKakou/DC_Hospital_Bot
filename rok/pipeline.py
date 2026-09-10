@@ -53,6 +53,39 @@ def classify_siege(reading: Reading, table: UnitTable) -> None:
         if entry is not None:
             row.in_ram_zone = entry.get("type") == "Siege"
 
+    _reconcile_siege_classification(reading)
+
+
+def _reconcile_siege_classification(reading: Reading) -> None:
+    """A Siege-typed row (almost always Battering Ram) is not always Ram Zone
+    troops - it can just as easily be an ordinary entry in the Severely
+    Wounded list itself, wounded like anything else. Nothing in what we read
+    off the screen distinguishes the two cases; type alone was the original
+    (untested-in-production) guess, and a real report proved it wrong: a
+    Battering Ram row summed exactly into wounded_current alongside the
+    other named rows, while ram_current was a separate, unrelated total this
+    screen never itemises at all.
+
+    Resolved the same way everything else in this pipeline is - by what
+    actually reconciles, not by assumption. If including the siege rows in
+    the wounded total is what makes the wounded rows add up exactly, they
+    are wounded rows, not ram-zone ones; only reclassify when that check is
+    unambiguous, so an already-correct (or genuinely uncertain) reading is
+    never disturbed.
+    """
+    if reading.wounded_current is None:
+        return
+    siege_rows = [r for r in reading.rows if r.in_ram_zone]
+    if not siege_rows:
+        return
+    other_sum = sum(r.count for r in reading.rows if not r.in_ram_zone)
+    siege_sum = sum(r.count for r in siege_rows)
+    if other_sum == reading.wounded_current:
+        return  # Already reconciles without them - the original guess holds.
+    if other_sum + siege_sum == reading.wounded_current:
+        for row in siege_rows:
+            row.in_ram_zone = False
+
 
 def evaluate(reading: Reading, table: UnitTable) -> ExtractionResult:
     classify_siege(reading, table)

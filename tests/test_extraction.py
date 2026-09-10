@@ -1182,6 +1182,51 @@ def test_unrelated_ui_text_does_not_become_a_phantom_troop_row():
     assert 1 not in counts
 
 
+def test_battering_ram_in_the_wounded_list_is_not_forced_into_ram_zone():
+    """Production report: a screenshot with Long Swordsman, Teutonic Knight,
+    Crossbowman, and Battering Ram all listed together under "Severely
+    Wounded Units" - all four rows summed to exactly the wounded total
+    (705,000), and the separate Battering Ram Zone total (50,000) had no
+    matching rows at all - still came back "Recorded - totals only" with a
+    warning reaction instead of a clean Pass.
+
+    classify_siege() (rok/pipeline.py) used to assume any Siege-typed row -
+    in practice always Battering Ram - belongs to the Ram Zone bucket, on
+    the theory that's the only place Siege units appear. True for this
+    project's original sample screenshot (where a lone 84-troop Battering
+    Ram row exactly matched an 84 ram_current), false here: nothing
+    distinguishes "this Battering Ram row is the wounded list's own entry"
+    from "this Battering Ram row IS the whole Ram Zone" except whether
+    including or excluding it is what makes the wounded total add up - so
+    that's what classify_siege now checks, instead of assuming by type.
+
+    Two more spots carried the same wrong assumption and needed the same
+    fix: session.py's unaccounted counted an un-itemisable Ram Zone gap as
+    "missing breakdown" forever (no rescan can fix a total this screen
+    structurally never shows a per-unit list for), and parse.py's
+    check_totals required ram_rows to sum to an EXACT match with
+    ram_current rather than just never exceeding it - both now treat "zero
+    ram_current rows" as the routine case it actually is, only flagging an
+    outright over-count as a real contradiction.
+    """
+    from rok import ocr as ocr_module
+    from rok.pipeline import evaluate
+
+    path = IMAGES / "44_battering_ram_in_wounded_list_not_ram_zone.webp"
+    if not path.exists():
+        pytest.skip("sample image not present locally")
+    image_bytes = path.read_bytes()
+    readings = ocr_module.read_all(image_bytes, list(TABLE.units))
+    result = evaluate(readings[0], TABLE)
+    assert result.ok, result.problems
+
+    store = SessionStore()
+    sub = store.get_or_create("1", 1, "p")
+    sub.merge(result)
+    assert sub.breakdown_complete
+    assert sub.status == "Complete"
+
+
 def test_glyph_icon_noise_beside_the_name_does_not_replace_the_count():
     """Production report: a screenshot with Royal Guard/Elite Janissary/Long
     Swordsman/Knight rows came back missing both unrecognised-name rows
