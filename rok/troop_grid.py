@@ -52,6 +52,13 @@ def siege_glyph_table() -> GlyphTable:
 
 TIERS = ("T1", "T2", "T3", "T4", "T5")
 
+# How far right of the frame the type glyph (sword/wheels/etc.) extends, as a
+# fraction of the frame's width. Shared between the glyph classification box
+# below and _read_number_near's crop, so the number-OCR crop can never
+# include the glyph icon itself - see _read_number_near's docstring for why
+# that overlap matters.
+_GLYPH_RIGHT_EDGE = 0.60
+
 
 @dataclass
 class SiegeReading:
@@ -234,7 +241,7 @@ def read_siege(image_bytes: bytes) -> SiegeReading:
         glyph_box = (
             right + max(1, int(fw * 0.03)),
             top + int(fw * 0.30),
-            right + int(fw * 0.60),
+            right + int(fw * _GLYPH_RIGHT_EDGE),
             top + int(fw * 0.70),
         )
         mask = glyph_mask(image, glyph_box)
@@ -298,13 +305,28 @@ def _read_number_near(image: Image.Image, frame_box: tuple[int, int, int, int]) 
     """Targeted close-up OCR for one icon's count, tried at several zoom
     levels. Only called for icons already confirmed as siege, since it is
     far more expensive than the single whole-image pass in _find_numbers.
+
+    The crop starts past the type glyph (_GLYPH_RIGHT_EDGE), not at the
+    frame's own right edge. Production report: a wagon-wheels glyph
+    immediately left of a genuine "51.877" got fed into this crop and read
+    by Tesseract as noise glued directly onto the real digits with no space
+    to split on ("251.877") - unlike a stray token elsewhere in the row,
+    fused noise inside one OCR'd word can't be caught by any of the
+    merge/trim guards downstream, since those only ever look at *separate*
+    tokens or groups. Cropping the glyph out entirely removes the noise
+    source instead of trying to filter it after the fact. Confirmed by
+    direct comparison: the un-cropped icon read as "#5 51.877" /
+    "�5 51.877" on this build's Tesseract even locally (harmless here only
+    because the noise happened to land as its own space-separated group);
+    past _GLYPH_RIGHT_EDGE the same crop reads cleanly as "51.877" alone.
     """
     import pytesseract
     from PIL import ImageOps
 
     left, top, right, bottom = frame_box
     fw = right - left
-    crop = image.crop((right, top + int(fw * 0.05), min(image.width, right + fw * 3), bottom))
+    number_left = right + int(fw * _GLYPH_RIGHT_EDGE)
+    crop = image.crop((number_left, top + int(fw * 0.05), min(image.width, right + fw * 3), bottom))
     if crop.width < 5 or crop.height < 5:
         return None
     gray = ImageOps.autocontrast(crop.convert("L"))

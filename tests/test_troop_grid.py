@@ -193,3 +193,26 @@ def test_a_stray_digit_does_not_corrupt_an_already_complete_number():
     # punctuated) must still merge in full.
     assert _trim_spurious_leading_groups("257 609") == "257 609"
     assert _trim_spurious_leading_groups("1 620 935") == "1 620 935"
+
+
+def test_glyph_icon_noise_does_not_fuse_into_the_count():
+    """Production report: a Vietnamese "Tong so don vi quan" (Total Troop
+    Units) screenshot's wagon-wheels siege count read as 251,877 instead of
+    the real 51,877 - a wrong reading that _merge_split_numbers/
+    _trim_spurious_leading_groups cannot catch, because this time the noise
+    was not a separate token or group at all. _read_number_near's crop used
+    to start right at the icon's frame edge, which is also where the type
+    glyph itself (sword/wheels/etc.) lives - Tesseract tried to read the
+    glyph's art as text and, on at least one Tesseract build, glued the
+    result directly onto the real digits with no space to split on. Fixed
+    by starting the crop past _GLYPH_RIGHT_EDGE, so the glyph's pixels never
+    reach this OCR pass at all - confirmed directly: the un-cropped crop
+    read noise ("#5 51.877" / "�5 51.877") even on this machine's
+    Tesseract, just as a harmless separate group; past the glyph edge the
+    same crop reads "51.877" cleanly with nothing to trim.
+    """
+    path = ROOT / "tests" / "images" / "41_vietnamese_period_grouped_siege_wagon_misread.webp"
+    if not path.exists():
+        pytest.skip("sample image not present locally")
+    reading = read_siege(path.read_bytes())
+    assert reading.by_tier.get("T1") == 51_877
