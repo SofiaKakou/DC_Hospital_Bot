@@ -1,0 +1,191 @@
+{
+  "_README": [
+    "TIER IS WHAT MATTERS. The fill check and the power figure both use only the",
+    "tier; troop type is recorded for information and nothing depends on it.",
+    "Tier is read from the portrait's rarity colour where possible - grey T1,",
+    "green T2, blue T3, purple T4, gold T5 - which works whatever civilisation the",
+    "unit belongs to and whatever language the game is in. This table is the",
+    "fallback for rows where the portrait could not be classified.",
+    "",
+    "",
+    "FILL CHECK: a submission passes when at least min_high_tier_troops troops of",
+    "a tier listed in high_tiers are in the hospital, of any troop type. Because",
+    "that is a minimum, the rows visible in one screenshot can already prove a",
+    "pass even when the list is scrolled.",
+    "",
+    "Unit names are unreliable across 20 civilisations and every game language, so",
+    "an unrecognised name is routine. Its row is still counted; an admin can name",
+    "it with /hospital learn if the tier could not be read from the portrait.",
+    "tier_power confirmed by the kingdom: T1 1, T2 2, T3 3, T4 4, T5 10."
+  ],
+  "verified_by_human": true,
+  "tier_power": {
+    "T1": 1,
+    "T2": 2,
+    "T3": 3,
+    "T4": 4,
+    "T5": 10
+  },
+  "high_tiers": [
+    "T4",
+    "T5"
+  ],
+  "min_high_tier_troops": 100000,
+  "units": {
+    "militia": {
+      "tier": "T1",
+      "type": "Infantry"
+    },
+    "spearman": {
+      "tier": "T2",
+      "type": "Infantry"
+    },
+    "long swordsman": {
+      "tier": "T4",
+      "type": "Infantry",
+      "heal_cost": {
+        "food": 102,
+        "wood": 102,
+        "gold": 7
+      }
+    },
+    "sword warrior": {
+      "tier": "T4",
+      "type": "Infantry"
+    },
+    "teutonic knight": {
+      "tier": "T4",
+      "type": "Cavalry"
+    },
+    "legionary": {
+      "tier": "T4",
+      "type": "Infantry"
+    },
+    "man-at-arms": {
+      "tier": "T4",
+      "type": "Infantry"
+    },
+    "samurai": {
+      "tier": "T4",
+      "type": "Infantry"
+    },
+    "hoplite": {
+      "tier": "T4",
+      "type": "Infantry"
+    },
+    "landsknecht": {
+      "tier": "T5",
+      "type": "Infantry"
+    },
+    "imperial guard": {
+      "tier": "T5",
+      "type": "Infantry"
+    },
+    "slinger": {
+      "tier": "T1",
+      "type": "Archer"
+    },
+    "archer": {
+      "tier": "T2",
+      "type": "Archer"
+    },
+    "crossbowman": {
+      "tier": "T4",
+      "type": "Archer"
+    },
+    "longbowman": {
+      "tier": "T4",
+      "type": "Archer"
+    },
+    "chu ko nu": {
+      "tier": "T4",
+      "type": "Archer"
+    },
+    "onna-musha": {
+      "tier": "T4",
+      "type": "Archer"
+    },
+    "hwarang": {
+      "tier": "T4",
+      "type": "Archer"
+    },
+    "musketeer": {
+      "tier": "T5",
+      "type": "Archer"
+    },
+    "scout": {
+      "tier": "T1",
+      "type": "Cavalry"
+    },
+    "light cavalry": {
+      "tier": "T2",
+      "type": "Cavalry",
+      "heal_cost": {
+        "food": 34,
+        "stone": 26
+      }
+    },
+    "heavy cavalry": {
+      "tier": "T3",
+      "type": "Cavalry",
+      "heal_cost": {
+        "food": 51,
+        "stone": 39,
+        "gold": 4
+      }
+    },
+    "cataphract": {
+      "tier": "T4",
+      "type": "Cavalry"
+    },
+    "knight": {
+      "tier": "T4",
+      "type": "Cavalry"
+    },
+    "conquistador": {
+      "tier": "T4",
+      "type": "Cavalry"
+    },
+    "keshig": {
+      "tier": "T4",
+      "type": "Cavalry"
+    },
+    "cuirassier": {
+      "tier": "T5",
+      "type": "Cavalry"
+    },
+    "battering ram": {
+      "tier": "T1",
+      "type": "Siege"
+    },
+    "catapult": {
+      "tier": "T2",
+      "type": "Siege"
+    },
+    "trebuchet": {
+      "tier": "T3",
+      "type": "Siege"
+    },
+    "onager": {
+      "tier": "T4",
+      "type": "Siege"
+    },
+    "bombard": {
+      "tier": "T5",
+      "type": "Siege"
+    },
+    "royal crossbowman": {
+      "tier": "T5",
+      "type": "Archer",
+      "heal_cost": {
+        "wood": 272,
+        "stone": 204,
+        "gold": 136
+      }
+    },
+    "mamluk": {
+      "tier": "T4",
+      "type": "Cavalry"
+    }
+  }
+}

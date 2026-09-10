@@ -1,0 +1,9 @@
+.env
+service_account.json
+service_account.runtime.json
+__pycache__/
+*.pyc
+tests/images/*
+!tests/images/.gitkeep
+.pytest_cache/
+submissions/
