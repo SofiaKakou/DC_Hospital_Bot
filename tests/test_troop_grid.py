@@ -18,7 +18,13 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from rok.troop_grid import SiegeReading, check_siege_rules, read_siege  # noqa: E402
+from rok.troop_grid import (  # noqa: E402
+    _NUMBER_TAIL,
+    SiegeReading,
+    check_siege_rules,
+    read_siege,
+)
+from rok.parse import parse_number  # noqa: E402
 
 IMAGES = ROOT / "tests" / "images" / "siege test"
 
@@ -62,6 +68,30 @@ def test_a_bow_shaped_portrait_can_still_be_a_siege_unit():
         pytest.skip("sample image not present locally")
     reading = read_siege(path.read_bytes())
     assert reading.by_tier.get("T2") == 4_800
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("200.000", 200_000),  # Vietnamese-client report: period-grouped thousands
+        ("1.620.935", 1_620_935),  # multiple grouping periods, as in the header banner
+        ("200,000", 200_000),  # comma-grouped, unaffected by the fix
+        ("ES 200.000", 200_000),  # leading OCR noise before the real digits
+    ],
+)
+def test_number_tail_handles_period_grouped_thousands(text, expected):
+    """Regression: a real production report had siege counts read as zero
+    on a Vietnamese-language client, which prints "200.000" rather than
+    "200,000". _NUMBER_TAIL originally only matched [\\d,], so it truncated
+    the token at the first period instead of passing the full number to
+    parse_number() (which already handles period-grouped thousands
+    correctly - rok/ocr.py's own _NUMERIC pattern already included periods
+    for exactly this reason; this module's narrower copy did not).
+    """
+    m = _NUMBER_TAIL.search(text)
+    assert m is not None
+    value, _ = parse_number(m.group(0))
+    assert value == expected
 
 
 # --------------------------------------------------------------------------- #

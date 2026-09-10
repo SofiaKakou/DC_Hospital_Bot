@@ -112,7 +112,13 @@ def _find_frame_blobs(image: Image.Image) -> list[tuple[int, int, int, int]]:
     return blobs
 
 
-_NUMBER_TAIL = re.compile(r"\d[\d,]*$")
+# Includes "." alongside "," because not every client uses comma-grouped
+# thousands - a real report from a Vietnamese-language client had counts
+# printed as "200.000". parse_number() already strips bare periods as a
+# thousands separator (see rok/parse.py); this regex just has to not
+# truncate the token before parse_number ever sees it, which the original
+# comma-only version did - "200.000" only matched its trailing "000".
+_NUMBER_TAIL = re.compile(r"\d[\d,.]*$")
 
 
 def _find_numbers(image: Image.Image) -> list[tuple[int, int, int, int, str]]:
@@ -146,18 +152,23 @@ def _find_numbers(image: Image.Image) -> list[tuple[int, int, int, int, str]]:
     return list(found.values())
 
 
-def _header_stats_bottom(image: Image.Image) -> int:
-    """Y-coordinate below the tab row ("In the City" / "On the Map").
+def _header_stats_bottom(blobs: list[tuple[int, int, int, int]]) -> int:
+    """Y-coordinate above which numbers belong to the header banner
+    ("Total Number of Units: 1,096,517", "Troop Power: ...", or their
+    translation into whatever language the client is set to) and must never
+    be mistaken for a grid entry.
 
-    The header banner above it ("Total Number of Units: 1,096,517", "Troop
-    Power: ...") contains numbers too, and those must never be mistaken for
-    a grid entry.
+    Originally found by OCR-matching the English tab labels ("In the City" /
+    "On the Map") - broken on every other client language, which is exactly
+    the kind of language dependency this project otherwise goes out of its
+    way to avoid (see rok/ocr.py's module docstring). The icon grid's own
+    position is a language-independent landmark instead: nothing in the
+    header banner has a gold portrait frame, so the topmost frame blob marks
+    where the real grid starts.
     """
-    bottom = 0
-    for word in _words(image, "--psm 4"):
-        if word.text in ("City", "Map", "Units"):
-            bottom = max(bottom, word.bottom)
-    return bottom
+    if not blobs:
+        return 0
+    return min(top for _, top, _, _ in blobs) - 20
 
 
 def read_siege(image_bytes: bytes) -> SiegeReading:
@@ -173,7 +184,7 @@ def read_siege(image_bytes: bytes) -> SiegeReading:
         reading.warnings.append("No troop icons found in the screenshot.")
         return reading
 
-    header_bottom = _header_stats_bottom(image)
+    header_bottom = _header_stats_bottom(blobs)
     numbers = [n for n in _find_numbers(image) if n[1] >= header_bottom + 10]
 
     table = siege_glyph_table()
