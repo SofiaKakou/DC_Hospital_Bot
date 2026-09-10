@@ -135,6 +135,15 @@ def _merge_split_numbers(words: list[_Word]) -> list[_Word]:
     separate number on the same line (a tier numeral near the portrait, say)
     sits behind the whole name and glyph, far wider than a thousands-
     separator space ever is.
+
+    The gap alone was measured not to be enough of a guard: on the siege
+    grid's icons, a stray OCR misread of the weapon-glyph graphic itself
+    ("#8", from Tesseract trying to read icon art as text) sat 13px from a
+    real count - closer than some genuine split-number gaps - and got fused
+    into it, turning a correct 55,965 into 855,965. The fix is what a
+    thousands separator actually means: every group after the first is
+    exactly three digits, never more or fewer. A stray single digit merging
+    into an already-complete number fails that test and is left alone.
     """
     if not words:
         return words
@@ -143,7 +152,8 @@ def _merge_split_numbers(words: list[_Word]) -> list[_Word]:
         prev = merged[-1]
         gap = word.left - prev.right
         height = max(prev.bottom - prev.top, 1)
-        if 0 <= gap <= height * 0.6:
+        incoming_digits = word.text.replace(",", "").replace(".", "").replace(" ", "")
+        if 0 <= gap <= height * 0.6 and len(incoming_digits) == 3:
             merged[-1] = _Word(
                 text=f"{prev.text} {word.text}",
                 left=prev.left,

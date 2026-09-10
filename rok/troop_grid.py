@@ -26,7 +26,16 @@ from pathlib import Path
 from PIL import Image
 
 from .glyphs import GlyphTable, glyph_mask
-from .ocr import _LAYOUT_CONFIGS, _group_lines, _is_frame, _variants, _words, tier_from_portrait
+from .ocr import (
+    _LAYOUT_CONFIGS,
+    _Word,
+    _group_lines,
+    _is_frame,
+    _merge_split_numbers,
+    _variants,
+    _words,
+    tier_from_portrait,
+)
 from .parse import parse_number
 
 _SIEGE_GLYPHS: GlyphTable | None = None
@@ -120,6 +129,15 @@ def _find_frame_blobs(image: Image.Image) -> list[tuple[int, int, int, int]]:
 # comma-only version did - "200.000" only matched its trailing "000".
 _NUMBER_TAIL = re.compile(r"\d[\d,.]*$")
 
+# Same idea, but allows a literal space within the digit run too (not \s -
+# that would also swallow a trailing newline from image_to_string). Only
+# used against the targeted zoom-in fallback's raw string output below,
+# where the crop is already narrowed to one icon's count - unlike
+# _NUMBER_TAIL's per-word use above, there is no risk of pulling in an
+# unrelated number here, so a space is safe to treat as part of the count
+# rather than a token boundary.
+_NUMBER_TAIL_LOOSE = re.compile(r"\d[\d,. ]*$")
+
 
 def _find_numbers(image: Image.Image) -> list[tuple[int, int, int, int, str]]:
     """Every count-like number token, tried across several OCR passes.
@@ -135,11 +153,29 @@ def _find_numbers(image: Image.Image) -> list[tuple[int, int, int, int, str]]:
         scale = variant.width / image.width
         for config in (*_LAYOUT_CONFIGS, "--psm 4"):
             for line in _group_lines(_words(variant, config)):
+                # Extract the trailing digit run from each word first (as
+                # before - tolerates leading OCR noise like "ES 200.000"),
+                # *then* merge adjacent extracted numbers across a small gap:
+                # a space-grouped count ("162 320") comes back as two
+                # separate word tokens the same way it did on the wounded-
+                # list screen (see _merge_split_numbers in rok/ocr.py for the
+                # full story - reused here rather than duplicated, since this
+                # module builds its own word list instead of going through a
+                # _Line's numeric_words()). Merging before extracting would
+                # instead drop noisy-prefixed words outright.
+                extracted = []
                 for word in line.words:
                     m = _NUMBER_TAIL.search(word.text)
-                    if not m or len(m.group(0).replace(",", "")) < 1:
+                    if not m:
                         continue
-                    value, _ = parse_number(m.group(0))
+                    extracted.append(
+                        _Word(text=m.group(0), left=word.left, top=word.top,
+                              right=word.right, bottom=word.bottom)
+                    )
+                for word in _merge_split_numbers(extracted):
+                    if len(word.text.replace(",", "").replace(".", "")) < 1:
+                        continue
+                    value, _ = parse_number(word.text)
                     if value is None:
                         continue
                     left, top = int(word.left / scale), int(word.top / scale)
@@ -148,7 +184,7 @@ def _find_numbers(image: Image.Image) -> list[tuple[int, int, int, int, str]]:
                     # same token from different passes into one entry.
                     key = (round(left / 15), round(top / 15))
                     if key not in found or (right - left) > (found[key][2] - found[key][0]):
-                        found[key] = (left, top, right, bottom, m.group(0))
+                        found[key] = (left, top, right, bottom, word.text)
     return list(found.values())
 
 
@@ -282,16 +318,46 @@ def _read_number_near(image: Image.Image, frame_box: tuple[int, int, int, int]) 
                     text = pytesseract.image_to_string(variant, config=f"--psm {psm}")
                 except Exception:
                     continue
-                m = _NUMBER_TAIL.search(text.strip())
+                m = _NUMBER_TAIL_LOOSE.search(text.strip())
                 if not m:
                     continue
-                digits = m.group(0)
+                digits = _trim_spurious_leading_groups(m.group(0))
                 # Prefer the longest read; a short one is more likely a
                 # truncated/partial match than a genuinely small count for a
                 # siege entry (which are never single digits in practice).
                 if best is None or len(digits) > len(best):
                     best = digits
     return best
+
+
+def _trim_spurious_leading_groups(text: str) -> str:
+    """Drop a leading group that isn't really part of this number.
+
+    _NUMBER_TAIL_LOOSE tolerates a space *within* the digit run so a
+    space-grouped count ("162 320") isn't truncated - but that alone once
+    turned a stray OCR misread of the weapon-glyph icon itself ("#8", read
+    as text) into "8 55,965", corrupting a correct 55,965 into 855,965.
+
+    The signal that separates the two: the last (rightmost) group is the
+    one actually anchored to the count position. If it already contains a
+    comma or period, Tesseract already resolved it as one complete number
+    by itself, and anything before it is more likely a stray misread than
+    a genuine further digit group - so nothing gets prepended. If the last
+    group is bare digits (no punctuation of its own), it may genuinely be
+    the tail of a larger space-grouped number, so bare-digit groups before
+    it keep merging leftward - stopping at the first punctuated group,
+    since a real number's groups don't mix "already grouped" with "not".
+    """
+    groups = text.split()
+    if not groups:
+        return text
+    kept = [groups[-1]]
+    if "," not in kept[0] and "." not in kept[0]:
+        for group in reversed(groups[:-1]):
+            if "," in group or "." in group:
+                break
+            kept.insert(0, group)
+    return " ".join(kept)
 
 
 # --------------------------------------------------------------------------- #

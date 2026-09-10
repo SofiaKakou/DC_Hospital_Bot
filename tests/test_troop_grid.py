@@ -39,6 +39,10 @@ GROUND_TRUTH = [
     ("image-1789042849295.png", {"T4": 12_000, "T1": 356_359}),
     ("image-1789042852022.webp", {"T1": 248_519}),
     ("image-1789042857434.webp", {"T1": 200_000}),
+    # French client, space-grouped thousands ("162 320") - see
+    # test_french_space_grouped_siege_count_reads_correctly below for the
+    # regression story.
+    ("french_space_grouped_162320.webp", {"T1": 162_320}),
 ]
 
 
@@ -148,3 +152,44 @@ def test_multiple_violations_are_all_reported():
     verdict, notes = check_siege_rules(_reading(T1=300_000, T2=5, T4=80_000))
     assert verdict == "FAIL"
     assert len(notes) == 3
+
+
+# --------------------------------------------------------------------------- #
+# Space-grouped counts and the stray-digit merge guard
+# --------------------------------------------------------------------------- #
+
+def test_french_space_grouped_siege_count_reads_correctly():
+    """A production report: a French client's siege count ("162 320", space-
+    grouped) was misread. Root cause was the same class of bug already fixed
+    in rok/ocr.py for the wounded-list screen (Tesseract splits a rendered
+    space into two word tokens) - but this module has its own separate
+    number-detection code, which hadn't been given the same fix. See
+    _merge_split_numbers (rok/ocr.py, shared by both modules) and
+    _trim_spurious_leading_groups below for the fix and the guard that
+    keeping it safe required.
+    """
+    path = IMAGES / "french_space_grouped_162320.webp"
+    if not path.exists():
+        pytest.skip("sample image not present locally")
+    reading = read_siege(path.read_bytes())
+    assert reading.by_tier.get("T1") == 162_320
+
+
+def test_a_stray_digit_does_not_corrupt_an_already_complete_number():
+    """Regression within the regression: the first fix for the case above
+    (merging adjacent numeric words across a small gap) was too permissive -
+    on a *different* real screenshot, a stray OCR misread of the weapon-
+    glyph icon itself ("#8", Tesseract trying to read icon art as text) sat
+    13px from a real count and got fused into it, turning a correct 55,965
+    into 855,965. Caught by re-running the full ground-truth suite before
+    shipping, not by inspection - see _trim_spurious_leading_groups's
+    docstring for the actual fix (a stray digit group is not a valid
+    continuation of a number that Tesseract already grouped by itself).
+    """
+    from rok.troop_grid import _trim_spurious_leading_groups
+
+    assert _trim_spurious_leading_groups("8 55,965") == "55,965"
+    # But a genuine multi-group space-separated number (no group already
+    # punctuated) must still merge in full.
+    assert _trim_spurious_leading_groups("257 609") == "257 609"
+    assert _trim_spurious_leading_groups("1 620 935") == "1 620 935"

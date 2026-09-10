@@ -1026,6 +1026,26 @@ def test_a_genuinely_separate_number_does_not_merge():
     assert [w.text for w in words] == ["4", "257 609"]
 
 
+def test_a_stray_digit_beside_an_already_complete_number_does_not_merge():
+    """Regression: the gap check alone was not enough of a guard. On the
+    siege grid screen (rok/troop_grid.py, which reuses this same function),
+    a stray OCR misread of a weapon-glyph icon ("#8" - Tesseract reading
+    icon art as text) sat only 13px from a real count - closer than some
+    genuine split-number gaps - and merged into it, turning a correct
+    55,965 into 855,965. What actually distinguishes them: every group after
+    the first in a real thousands-grouped number is exactly three digits;
+    a stray single digit fused onto an already-multi-digit number is not.
+    """
+    from rok.ocr import _Line, _Word
+
+    line = _Line([
+        _Word("8", 352, 803, 392, 863),  # stray icon misread
+        _Word("55965", 405, 823, 550, 859),  # already a complete number
+    ])
+    words = line.numeric_words()
+    assert [w.text for w in words] == ["8", "55965"]
+
+
 def test_french_space_grouped_hospital_screenshot_reads_correctly():
     """The real screenshot behind the regression above: a French client,
     "Blessés graves" (Severely Wounded), counts printed with spaces
