@@ -1083,3 +1083,36 @@ def test_turkish_period_grouped_hospital_counts_read_correctly():
     assert 149_177 in counts
     assert 100_362 in counts
     assert 102_914 in counts
+
+
+def test_a_row_clipped_by_the_game_s_own_ui_does_not_get_a_wrong_tier():
+    """Production report: a Crossbowman row (name-table tier T4) came back as
+    T5 in production and T3 in a local repro - neither correct, and
+    disagreeing between environments pointed at a bug, not just noise.
+
+    The portrait was genuinely truncated, but not by the screenshot's own
+    edge - there was plenty of clear space below it. It was clipped by the
+    game's OWN modal layout: the resource-cost strip ("96.1M / 70.2M / ...")
+    starts right where this row's portrait would continue, inside the dialog
+    itself. Per-row detection (_portrait_box) correctly found nothing and
+    returned None for this row - confirmed directly during the investigation.
+    The wrong tier came from the fallback: _fit_portrait_column() pools
+    geometry from the OTHER (clean) rows and applies it to every row
+    uniformly, without ever checking whether a real frame exists at that
+    position for this specific row. Over a clipped row, that pooled box
+    landed on UI chrome, not a portrait, and tier_from_portrait() happily
+    scored whatever colour was there. See _fit_box_has_frame in rok/ocr.py
+    for the fix: require an actual frame ring at the fitted position before
+    trusting a reading from it.
+    """
+    from rok import ocr as ocr_module
+
+    path = IMAGES / "40_clipped_row_wrong_tier_english.webp"
+    if not path.exists():
+        return
+    image_bytes = path.read_bytes()
+    readings = ocr_module.read_all(image_bytes, list(TABLE.units))
+    rows_by_name = {r.raw_name: r for r in readings[0].rows}
+    row = rows_by_name.get("crossbowman")
+    assert row is not None
+    assert row.tier in (None, "T4")

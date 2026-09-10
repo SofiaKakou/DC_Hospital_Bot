@@ -223,6 +223,47 @@ _PORTRAIT_BAND = (0.14, 0.34)
 # T5 would wave a padded hospital straight through.
 _PORTRAIT_MIN_SHARE = 0.55
 
+# The fitted column's box is never measured against this specific row - it is
+# the pooled median geometry from whichever OTHER rows had a clean frame.
+# That is fine for a row whose own frame just fragmented in the OCR pass, but
+# a row that is genuinely clipped by the game's own modal layout (the cost
+# strip starting partway down its portrait) has no real frame at that
+# position at all, and tier_from_portrait() would happily score whatever
+# colour happens to sit there - measured on a real production screenshot to
+# read a confident, wrong tier from a portrait that was actually cut off by
+# the "96.1M / 70.2M / ..." resource strip below it. Requiring an actual
+# frame ring at the fitted position before trusting it closes that gap: a
+# genuine portrait's four edges are mostly gold bevel even when interior
+# detection failed; a box sitting over UI chrome is not.
+_FIT_BOX_MIN_FRAME_SHARE = 0.4
+
+
+def _fit_box_has_frame(source: Image.Image, box: tuple[int, int, int, int]) -> bool:
+    """Whether a fitted-column box actually has a frame ring at that spot."""
+    left, top, right, bottom = box
+    if right - left < 10 or bottom - top < 10:
+        return False
+    left = max(0, left)
+    top = max(0, top)
+    right = min(source.width, right)
+    bottom = min(source.height, bottom)
+    if right - left < 10 or bottom - top < 10:
+        return False
+    pixels = source.load()
+    hits = 0
+    total = 0
+    for x in range(left, right):
+        for y in (top, bottom - 1):
+            total += 1
+            if _is_frame(*pixels[x, y][:3]):
+                hits += 1
+    for y in range(top, bottom):
+        for x in (left, right - 1):
+            total += 1
+            if _is_frame(*pixels[x, y][:3]):
+                hits += 1
+    return total > 0 and hits / total >= _FIT_BOX_MIN_FRAME_SHARE
+
 
 def _name_start(line: "_Line") -> int | None:
     """Left edge of the unit name, skipping the weapon glyph and OCR noise."""
@@ -813,7 +854,13 @@ def _read_rows(
         tier = tier_from_portrait(source, box) if box else None
         if tier is None and fit is not None:
             fitted = fit.box(centre)
-            tier = tier_from_portrait(source, fitted)
+            # The fitted box is pooled geometry, never confirmed against this
+            # row - a row whose portrait is genuinely clipped (by the game's
+            # own UI, not the screenshot edge) has no real frame there at all,
+            # and tier_from_portrait() would score whatever happens to sit in
+            # that box. Require an actual frame ring first.
+            if _fit_box_has_frame(source, fitted):
+                tier = tier_from_portrait(source, fitted)
             box = box or fitted
 
         troop_type = None
