@@ -112,7 +112,48 @@ class _Line:
         return re.sub(r"\s+", " ", text).strip()
 
     def numeric_words(self) -> list[_Word]:
-        return [w for w in self.words if _NUMERIC.match(clean_number_token(w.text))]
+        return _merge_split_numbers(
+            [w for w in self.words if _NUMERIC.match(clean_number_token(w.text))]
+        )
+
+
+def _merge_split_numbers(words: list[_Word]) -> list[_Word]:
+    """Merge adjacent numeric-only words separated by a small gap into one.
+
+    Not every client groups thousands with a comma: a real report read
+    "257 609" (French, space-grouped) as two separate troop counts, 257 and
+    609, because Tesseract treats a rendered space as a word boundary the
+    same way it would between two actual words - the two tokens were only
+    10px apart on a ~30px-tall line. Both callers of numeric_words()
+    (_count_word's "first number after the name", and the unrecognised-name
+    fallback's "last number on the line") were built assuming one troop
+    count is always one token, so each silently kept only half of a
+    space-grouped number instead of failing loudly.
+
+    Only merges numeric-only tokens (the caller already filtered to those),
+    and only across a gap smaller than the token's own height - a genuinely
+    separate number on the same line (a tier numeral near the portrait, say)
+    sits behind the whole name and glyph, far wider than a thousands-
+    separator space ever is.
+    """
+    if not words:
+        return words
+    merged = [words[0]]
+    for word in words[1:]:
+        prev = merged[-1]
+        gap = word.left - prev.right
+        height = max(prev.bottom - prev.top, 1)
+        if 0 <= gap <= height * 0.6:
+            merged[-1] = _Word(
+                text=f"{prev.text} {word.text}",
+                left=prev.left,
+                top=min(prev.top, word.top),
+                right=word.right,
+                bottom=max(prev.bottom, word.bottom),
+            )
+        else:
+            merged.append(word)
+    return merged
 
 
 # --------------------------------------------------------------------------- #

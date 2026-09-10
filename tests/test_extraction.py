@@ -982,3 +982,84 @@ def test_stone_icon_alone_is_not_yet_reliably_classified():
     if stone is None:
         return
     assert resource_from_icon(stone, 0, stone.width, 0, stone.height) == "stone"
+
+
+# --------------------------------------------------------------------------- #
+# Space-grouped thousands (non-comma locales)
+# --------------------------------------------------------------------------- #
+
+def test_split_numeric_words_merge_across_a_small_gap():
+    """Regression: a real report read a French client's "257 609" (space-
+    grouped thousands) as just 609. Tesseract treats a rendered space as a
+    word boundary like any other, reporting "257" and "609" as two separate
+    words only ~10px apart on a ~30px-tall line - both _count_word (first
+    number after the name) and the unrecognised-name fallback (last number
+    on the line) assumed a troop count is always one token, so each kept
+    only half the real number instead of failing loudly. Fixed by merging
+    adjacent numeric-only words across a small gap before either path picks
+    from them - see _merge_split_numbers in rok/ocr.py.
+    """
+    from rok.ocr import _Line, _Word
+
+    line = _Line([
+        _Word("Janissaire", 1541, 688, 1708, 718),
+        _Word("257", 1725, 689, 1784, 718),
+        _Word("609", 1794, 689, 1853, 718),
+    ])
+    words = line.numeric_words()
+    assert len(words) == 1, "the two close tokens must merge into one"
+    assert words[0].text == "257 609"
+
+
+def test_a_genuinely_separate_number_does_not_merge():
+    # A tier numeral or other stray digit far to the left of the real count
+    # must not get swept into it just because both are numeric-looking.
+    from rok.ocr import _Line, _Word
+
+    line = _Line([
+        _Word("4", 100, 690, 115, 718),  # unrelated, far away
+        _Word("Janissaire", 1541, 688, 1708, 718),
+        _Word("257", 1725, 689, 1784, 718),
+        _Word("609", 1794, 689, 1853, 718),
+    ])
+    words = line.numeric_words()
+    assert [w.text for w in words] == ["4", "257 609"]
+
+
+def test_french_space_grouped_hospital_screenshot_reads_correctly():
+    """The real screenshot behind the regression above: a French client,
+    "Blessés graves" (Severely Wounded), counts printed with spaces
+    ("171 500", "257 609", ...). Janissaire is not in data/units.json (an
+    Ottoman/French-flavoured name), so this specifically exercises the
+    unrecognised-name fallback path, not the happy path.
+    """
+    from rok import ocr as ocr_module
+
+    path = IMAGES / "38_french_space_grouped_thousands.webp"
+    if not path.exists():
+        return
+    image_bytes = path.read_bytes()
+    readings = ocr_module.read_all(image_bytes, list(TABLE.units))
+    rows_by_name = {r.raw_name: r.count for r in readings[0].rows}
+    assert rows_by_name.get("Janissaire") == 257_609
+
+
+def test_turkish_period_grouped_hospital_counts_read_correctly():
+    """A Turkish client (period-grouped thousands, e.g. "149.177") reading
+    correctly already - included as a companion to the French/space-grouped
+    case above so both locales stay covered, not because this one was ever
+    broken (rok/parse.py's parse_number already treated a bare period as a
+    thousands separator; only the space case needed a fix).
+    """
+    from rok import ocr as ocr_module
+
+    path = IMAGES / "39_turkish_period_grouped_thousands.webp"
+    if not path.exists():
+        return
+    image_bytes = path.read_bytes()
+    readings = ocr_module.read_all(image_bytes, list(TABLE.units))
+    counts = sorted(r.count for r in readings[0].rows if r.count)
+    assert 82_877 in counts
+    assert 149_177 in counts
+    assert 100_362 in counts
+    assert 102_914 in counts
