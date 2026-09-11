@@ -165,5 +165,24 @@ def extract(
         )
 
     # Nothing passed - hand back whichever attempt got closest so a human can judge.
-    attempts.sort(key=lambda r: (len(r.problems), -len(r.rows)))
+    #
+    # Problem COUNT alone is a bad proxy for "closest": a pass that read
+    # almost nothing (no wounded total, no rows) trivially has fewer things
+    # to complain about than a mostly-correct pass that read most rows and
+    # flagged 2-3 specific, real issues (an unknown unit here, an arithmetic
+    # mismatch there) - and used to lose to it on this sort alone.
+    # Production report: exactly this, on a Turkish screenshot - one pass
+    # correctly read the wounded total and 2 of 3 rows (flagging the third,
+    # unrecognised name, as a real problem); a different pass fumbled a
+    # digit and read neither the wounded total nor any row at all (one vague
+    # problem: "could not read the total"), and that worse pass is what got
+    # shown. Whether the wounded total was read at all is a much stronger
+    # signal of usefulness than raw problem count, so it is checked first.
+    attempts.sort(
+        key=lambda r: (
+            0 if r.reading.wounded_current is not None else 1,
+            len(r.problems),
+            -len(r.rows),
+        )
+    )
     return attempts[0]

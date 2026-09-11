@@ -1257,3 +1257,76 @@ def test_glyph_icon_noise_beside_the_name_does_not_replace_the_count():
     readings = ocr_module.read_all(image_bytes, list(TABLE.units))
     counts = {r.count for r in readings[0].rows}
     assert {98_615, 11_482, 49_270, 488_597} <= counts
+
+
+def test_a_pending_total_label_does_not_leak_onto_a_later_fraction():
+    """Production report: a screenshot's Wounded total came back showing
+    the Ram Zone line's own numbers (27,213/50,000) instead of the real
+    Severely Wounded total (696,651/720,000).
+
+    _read_totals only cleared its "pending" label (set by matching a
+    "Severely Wounded"/"Battering Ram Zone" header line) inside the branch
+    where the NEXT fraction-shaped line parsed successfully. If that
+    intended value line failed to parse - or got rejected by the auto-heal
+    banner's capacity floor just above - the label stayed live and could
+    attach itself to a completely unrelated LATER fraction instead, exactly
+    the shape of this bug. Not reproducible locally against this exact
+    Tesseract build (every local pass already reads this screenshot's
+    totals correctly - the usual local/production OCR variance), but the
+    leak itself is real and directly reachable: see the unit test below for
+    a minimal, deterministic reproduction that does not depend on any
+    particular OCR misread to trigger the leak.
+    """
+    from rok.ocr import Reading, _Line, _Word, _read_totals
+
+    def word(text: str, left: int = 0) -> _Word:
+        return _Word(text=text, left=left, top=0, right=left + 10, bottom=10)
+
+    def line(words: list[_Word]) -> _Line:
+        return _Line(words=words)
+
+    # "Severely Wounded Units" header, then a line that CONTAINS a slash but
+    # fails to parse as a fraction (no digits either side - simulating a
+    # badly garbled OCR read of the real value), then - with no
+    # "Battering Ram Zone" header in between to legitimately reset the
+    # label - the Ram Zone's own genuine fraction. Before the fix, the
+    # stale "wounded" label from the first line would still be live and
+    # attach itself to this fraction instead of the default
+    # capacity-based heuristic correctly calling it "ram".
+    lines = [
+        line([word("severely"), word("wounded", 40), word("units", 80)]),
+        line([word("abc/def")]),
+        line([word("27,213/50,000")]),
+    ]
+    reading = Reading(source="t")
+    _read_totals(lines, reading)
+    assert reading.wounded_current is None
+    assert reading.ram_current == 27_213
+    assert reading.ram_capacity == 50_000
+
+
+def test_a_reading_with_more_real_problems_is_still_preferred_over_a_blank_one():
+    """Production report: a Turkish screenshot's Wounded total (231.000)
+    came back "not visible" and the Ram Zone total came back garbled
+    (231,000/23,100 - a misread digit dropped from the real 231.000), with
+    an otherwise mostly-correct reading available from a different OCR pass
+    (right totals, 2 of 3 rows, only flagging a genuinely unknown unit
+    name).
+
+    extract()'s tie-break, when nothing passes cleanly, used to sort purely
+    by problem COUNT - which rewards a pass that gave up early (nothing
+    read, one vague "could not read the total" problem) over a pass that
+    read most of the screen correctly and honestly flagged 2-3 specific
+    issues. Fixed by checking whether the wounded total was read at all
+    before ever looking at problem count - see extract() in
+    rok/pipeline.py.
+    """
+    from rok.pipeline import extract
+
+    path = IMAGES / "45_turkish_samuray_names_unrecognized.webp"
+    if not path.exists():
+        pytest.skip("sample image not present locally")
+    image_bytes = path.read_bytes()
+    result = extract(image_bytes, TABLE)
+    assert result.reading.wounded_current == 231_000
+    assert result.reading.ram_current == 0

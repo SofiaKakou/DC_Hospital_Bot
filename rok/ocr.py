@@ -555,6 +555,19 @@ def _read_totals(
 
         if "/" in line.text:
             current, capacity = parse_fraction(line.text)
+            # A pending label is only good for the very next fraction-shaped
+            # line - win or lose. It used to only get cleared inside the
+            # successful-parse branch below, so a header match ("Severely
+            # Wounded Units") that failed to pair with its own value (a bad
+            # OCR pass, or the value getting rejected by the floor just
+            # below) stayed live and could attach itself to a LATER,
+            # unrelated fraction instead - a production report showed the
+            # Ram Zone line's own numbers recorded as the Wounded total,
+            # which is exactly that leak. Capturing the label now and always
+            # clearing `pending` closes it regardless of which branch this
+            # line ends up taking.
+            label = pending
+            pending = None
             # The alliance auto-heal banner ("<name> auto-helped heal your
             # units. 10/30") prints its own small fraction - out of a fixed
             # 30 help slots, a game constant independent of language or
@@ -575,14 +588,13 @@ def _read_totals(
                     (w for w in line.words if "/" in w.text),
                     min(line.words, key=lambda w: w.left),
                 )
-                label = pending or ("ram" if capacity <= 100_000 else "wounded")
+                label = label or ("ram" if capacity <= 100_000 else "wounded")
                 if label == "ram" and reading.ram_current is None:
                     reading.ram_current, reading.ram_capacity = current, capacity
                     ram_word = anchor
                 elif label == "wounded" and reading.wounded_current is None:
                     reading.wounded_current, reading.wounded_capacity = current, capacity
                     wounded_word = anchor
-                pending = None
                 continue
 
         if "battering ram zone" in flat:
