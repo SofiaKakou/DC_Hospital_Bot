@@ -661,6 +661,39 @@ async def on_message(message: discord.Message) -> None:
     if message.author.bot:
         return
 
+    # A plain mention reports where the drop stands. Checked before the
+    # channel-specific routing below so it works from anywhere the bot can
+    # see it, not just the submission channel - but the reply itself always
+    # goes to the log channel, never wherever the ping came from. The
+    # submission channel is meant to hold nothing but reactions and
+    # screenshots (see process_submission), and a status ping isn't a
+    # submission result either, so it does not belong inline in the log
+    # channel's own test-submission flow if that is where the ping happened
+    # to land - it is routed the same way regardless of origin.
+    # message.mentions excludes @everyone/@here, so only a real tag counts.
+    if client.user in message.mentions:
+        embed = await campaign_embed()
+        if CFG.verification_log_channel_id:
+            channel = client.get_channel(CFG.verification_log_channel_id)
+            if channel is not None:
+                try:
+                    await channel.send(
+                        content=f"Status requested by **{message.author.display_name}** - {message.jump_url}",
+                        embed=embed,
+                    )
+                except Exception:
+                    log.exception("Could not post status to the verification log channel")
+            else:
+                log.warning(
+                    "Verification log channel %s not found - not in this guild, or not cached yet.",
+                    CFG.verification_log_channel_id,
+                )
+        else:
+            # No log channel configured at all - falling back to an inline
+            # reply beats a ping that silently does nothing.
+            await message.reply(embed=embed, mention_author=False)
+        return
+
     if CFG.verification_log_channel_id and message.channel.id == CFG.verification_log_channel_id:
         await handle_log_test_message(message)
         return
@@ -670,12 +703,6 @@ async def on_message(message: discord.Message) -> None:
         return
 
     if CFG.submission_channel_id and message.channel.id != CFG.submission_channel_id:
-        return
-
-    # A plain mention reports where the drop stands.
-    # message.mentions excludes @everyone/@here, so only a real tag counts.
-    if client.user in message.mentions:
-        await message.reply(embed=await campaign_embed(), mention_author=False)
         return
 
     images = [a for a in message.attachments if is_image(a)]
