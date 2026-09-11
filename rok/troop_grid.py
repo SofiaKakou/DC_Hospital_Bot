@@ -146,6 +146,30 @@ _NUMBER_TAIL = re.compile(r"\d[\d,.]*$")
 _NUMBER_TAIL_LOOSE = re.compile(r"\d[\d,. ]*$")
 
 
+def _strip_fused_leading_digits(text: str) -> str:
+    """Drop leading digits that cannot belong to a real comma-grouped number.
+
+    A genuine thousands-grouped numeral's first (leftmost) group is always
+    1-3 digits - a comma never appears more than 3 digits in from the left
+    of the whole number. Production report: a siege icon's real "200,000"
+    got read, in one OCR pass, as "42200,000" - a stray "42" fused directly
+    onto the real digits with no space or gap _merge_split_numbers could
+    ever see (that guard only catches noise arriving as a *separate* token;
+    this was one Tesseract-recognised word already). "42200" as a first
+    group is structurally impossible for a real number, so trimming down to
+    the last 3 digits of it recovers the genuine value. Only acts when a
+    comma is present - a bare run of digits with no comma at all could
+    still legitimately be an un-grouped OCR read of a real number, and is
+    left untouched rather than risk cutting a real one down.
+    """
+    if "," not in text:
+        return text
+    first, rest = text.split(",", 1)
+    if len(first) > 3:
+        first = first[-3:]
+    return f"{first},{rest}"
+
+
 def _find_numbers(image: Image.Image) -> list[tuple[int, int, int, int, str]]:
     """Every count-like number token, tried across several OCR passes.
 
@@ -176,8 +200,8 @@ def _find_numbers(image: Image.Image) -> list[tuple[int, int, int, int, str]]:
                     if not m:
                         continue
                     extracted.append(
-                        _Word(text=m.group(0), left=word.left, top=word.top,
-                              right=word.right, bottom=word.bottom)
+                        _Word(text=_strip_fused_leading_digits(m.group(0)), left=word.left,
+                              top=word.top, right=word.right, bottom=word.bottom)
                     )
                 for word in _merge_split_numbers(extracted):
                     if len(word.text.replace(",", "").replace(".", "")) < 1:

@@ -216,3 +216,44 @@ def test_glyph_icon_noise_does_not_fuse_into_the_count():
         pytest.skip("sample image not present locally")
     reading = read_siege(path.read_bytes())
     assert reading.by_tier.get("T1") == 51_877
+
+
+def test_a_digit_fused_directly_onto_the_count_is_stripped():
+    """Production report: a "Total Number of Units" screenshot's siege
+    count (200,000, clearly the only siege icon shown) read as 42,200,000.
+
+    Unlike the wagon-icon case above, the noise here was not from the type
+    glyph and did not arrive as a separate token _merge_split_numbers could
+    catch - one OCR pass (psm 6) read the whole thing as a single word,
+    "42200,000", with a stray "42" fused directly onto the real digits and
+    no gap anywhere to split on. A different pass (psm 4) read the same
+    icon correctly as "200,000", but _find_numbers pools candidates by
+    rounded position and these two landed in different buckets (a few
+    pixels apart), so both survived as separate candidates and the
+    corrupted one won arbitrarily.
+
+    The fix does not depend on cross-pass agreement at all: a real
+    comma-grouped number's first (leftmost) group is always 1-3 digits - a
+    comma never appears more than three digits in from the left. "42200"
+    as a first group is structurally impossible, so trimming it down to
+    its last three digits ("200") recovers the genuine value on its own,
+    even from a single corrupted pass. See _strip_fused_leading_digits.
+    """
+    path = ROOT / "tests" / "images" / "47_siege_t1_42mil_merged.png"
+    if not path.exists():
+        pytest.skip("sample image not present locally")
+    reading = read_siege(path.read_bytes())
+    assert reading.by_tier.get("T1") == 200_000
+
+
+def test_strip_fused_leading_digits_directly():
+    from rok.troop_grid import _strip_fused_leading_digits
+
+    assert _strip_fused_leading_digits("42200,000") == "200,000"
+    # A genuinely large number's own first group (1-3 digits) must survive
+    # untouched - only an impossible (>3 digit) first group gets trimmed.
+    assert _strip_fused_leading_digits("1,620,935") == "1,620,935"
+    assert _strip_fused_leading_digits("162,320") == "162,320"
+    # No comma at all: left alone, since a bare digit run could still be a
+    # legitimate un-grouped OCR read of a real number.
+    assert _strip_fused_leading_digits("200000") == "200000"
