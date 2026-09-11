@@ -257,3 +257,45 @@ def test_strip_fused_leading_digits_directly():
     # No comma at all: left alone, since a bare digit run could still be a
     # legitimate un-grouped OCR read of a real number.
     assert _strip_fused_leading_digits("200000") == "200000"
+
+
+def test_a_genuinely_empty_army_reads_as_a_clean_pass():
+    """Production report: a governor who had disbanded every troop
+    submitted the Troop Details screen exactly as the game shows it - no
+    gold-frame icons anywhere, "No Units" printed where the grid would be -
+    and it was rejected outright as unreadable instead of recorded as the
+    clean Pass an all-zero siege composition actually is.
+
+    _find_frame_blobs finding nothing is otherwise the strongest signal
+    that a screenshot isn't this screen at all (wrong image, bad crop), so
+    it can't simply be ignored - _confirmed_no_units is the positive check
+    that tells the two apart: the game's own "list is empty" text, only
+    ever consulted once the icon scan has already come up blank.
+    """
+    path = ROOT / "tests" / "images" / "48_siege_zero_troops_no_units.png"
+    if not path.exists():
+        pytest.skip("sample image not present locally")
+    reading = read_siege(path.read_bytes())
+    assert reading.warnings == []
+    assert reading.by_tier == {t: 0 for t in ("T1", "T2", "T3", "T4", "T5")}
+    verdict, _ = check_siege_rules(reading)
+    assert verdict == "Pass"
+
+
+def test_a_genuinely_unreadable_screenshot_still_gets_flagged():
+    """Companion to the empty-army case above: _confirmed_no_units must
+    stay a positive check, not a blanket "no icons found = fine" - an
+    icon-less image that ISN'T this screen at all (and doesn't say "No
+    Units") should still be rejected rather than silently recorded as a
+    clean Pass, or a genuinely wrong submission would get written to the
+    sheet as if it were a real empty-army check.
+    """
+    from PIL import Image
+
+    blank = Image.new("RGB", (800, 600), (30, 30, 30))
+    import io
+
+    buf = io.BytesIO()
+    blank.save(buf, format="PNG")
+    reading = read_siege(buf.getvalue())
+    assert reading.warnings == ["No troop icons found in the screenshot."]

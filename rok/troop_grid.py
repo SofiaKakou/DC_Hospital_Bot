@@ -238,6 +238,34 @@ def _header_stats_bottom(blobs: list[tuple[int, int, int, int]]) -> int:
     return min(top for _, top, _, _ in blobs) - 20
 
 
+# The game's own "this list is empty" text on the Troop Details grid, one
+# entry per client language a real report has confirmed. Only ever consulted
+# when the frame scan already found zero icons - this is a positive
+# confirmation that the emptiness is genuine, not a substitute for the icon
+# scan itself. Unlike a unit name, this isn't something an admin can teach
+# via /hospital learn, so a language missing here needs a code change - add
+# the phrase as it's reported, the same way a new unit name gets added to
+# data/units.json.
+_EMPTY_GRID_PHRASES = ("no units",)
+
+
+def _confirmed_no_units(image: Image.Image) -> bool:
+    """Whether an icon-less grid is a genuinely empty army, not a bad read.
+
+    Production report: a governor who had disbanded every troop submitted
+    this screen exactly as the game shows it - no gold-frame icons
+    anywhere, "No Units" printed where the grid would be - and it was
+    rejected outright as unreadable. All-zero trivially passes every siege
+    rule, so this should have been recorded as a clean Pass.
+    """
+    for variant in _variants(image):
+        for config in _LAYOUT_CONFIGS:
+            for line in _group_lines(_words(variant, config)):
+                if any(phrase in line.flat for phrase in _EMPTY_GRID_PHRASES):
+                    return True
+    return False
+
+
 def read_siege(image_bytes: bytes) -> SiegeReading:
     """Read one Troop Details screenshot, keeping only siege entries."""
     import io
@@ -248,6 +276,13 @@ def read_siege(image_bytes: bytes) -> SiegeReading:
     reading = SiegeReading()
     blobs = _find_frame_blobs(image)
     if not blobs:
+        if _confirmed_no_units(image):
+            # Genuinely empty, not unreadable - a governor who has
+            # disbanded/lost every troop gets exactly this: no icons at
+            # all, "No Units" printed in the middle of the grid. All-zero
+            # trivially satisfies every siege rule, so this is a real Pass,
+            # not a screenshot that failed to read.
+            return reading
         reading.warnings.append("No troop icons found in the screenshot.")
         return reading
 
